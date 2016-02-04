@@ -1,22 +1,29 @@
 #include <stdio.h>
 #include <unistd.h>
-//#include <errno.h>
+#include <errno.h>
 #include <string.h>
 #include <assert.h>
 #include "bufio.h"
 
-static ssize_t _buf_flush_once(struct bufio *buf);
+static ssize_t buf_read_once(struct bufio *buf);
+static ssize_t buf_flush_once(struct bufio *buf);
+static void buf_can_read_max(struct bufio *buf, char **bufed, size_t *len);
+static void buf_len_del(struct bufio *buf, size_t len);
+static void buf_can_write_max(struct bufio *buf, char **bufed, size_t *len);
+static void buf_len_add(struct bufio *buf, size_t len);
 
 ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 {
 	size_t data_len, data_offset, tmp_len;
 	ssize_t write_len;
-	char *buf_ptr, tmp_ptr;
+	char *buf_ptr, *tmp_ptr;
 
 	//无缓冲时读取数据
 	if (buf->len == 0) {
-		write_len = _buf_read_once(buf);
-		if (write_len < 1) {
+		write_len = buf_read_once(buf);
+		if (write_len == 0) {
+			return 0;
+		} else if (write_len == -1) {
 			return -1;
 		}
 	}
@@ -27,7 +34,7 @@ ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 	//将数据复制到缓冲区
 	while (data_len > 0 && buf->len > 0) {
 		//可用的最大长度
-		_buf_can_read_max(buf, &buf_ptr, &tmp_len);
+		buf_can_read_max(buf, &buf_ptr, &tmp_len);
 
 		if (tmp_len > data_len) {
 			tmp_len = data_len;
@@ -35,7 +42,7 @@ ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 
 		tmp_ptr = (char *)memchr(buf_ptr, '\n', tmp_len);
 		if (tmp_ptr != NULL) {
-			tmp_len = buf_ptr - tmp_ptr + 1;
+			tmp_len = tmp_ptr - buf_ptr + 1;
 		}
 
 		//向缓冲区写数据
@@ -46,8 +53,14 @@ ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 		data_len -= tmp_len;
 
 		//缓冲长度减少
-		_buf_len_del(buf, tmp_len);
+		buf_len_del(buf, tmp_len);
+
+		if (tmp_ptr != NULL) {
+			break;
+		}
 	}
+
+	return data_offset;
 }
 
 ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
@@ -58,8 +71,10 @@ ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
 
 	//无缓冲时读取数据
 	if (buf->len == 0) {
-		write_len = _buf_read_once(buf);
-		if (write_len < 1) {
+		write_len = buf_read_once(buf);
+		if (write_len == 0) {
+			return 0;
+		} else if (write_len == -1) {
 			return -1;
 		}
 	}
@@ -70,7 +85,7 @@ ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
 	//将数据复制到缓冲区
 	while (data_len > 0 && buf->len > 0) {
 		//可用的最大长度
-		_buf_can_read_max(buf, &buf_ptr, &tmp_len);
+		buf_can_read_max(buf, &buf_ptr, &tmp_len);
 
 		if (tmp_len > data_len) {
 			tmp_len = data_len;
@@ -84,8 +99,10 @@ ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
 		data_len -= tmp_len;
 
 		//缓冲长度减少
-		_buf_len_del(buf, tmp_len);
+		buf_len_del(buf, tmp_len);
 	}
+
+	return data_offset;
 }
 
 ssize_t buf_write(struct bufio *buf, const void *data, size_t len)
@@ -101,7 +118,7 @@ BUF_AGAIN:
 	//将数据复制到缓冲区
 	while (data_len > 0 && buf->len < buf->cap) {
 		//可用的最大长度
-		_buf_can_write_max(buf, &buf_ptr, &tmp_len);
+		buf_can_write_max(buf, &buf_ptr, &tmp_len);
 
 		if (tmp_len > data_len) {
 			tmp_len = data_len;
@@ -115,12 +132,12 @@ BUF_AGAIN:
 		data_len -= tmp_len;
 
 		//缓冲长度增加
-		_buf_len_add(tmp_len);
+		buf_len_add(buf, tmp_len);
 	}
 
 	//如果还有数据未写入缓冲中，则先将一部分实际输出
 	if (data_len > 0) {
-		write_len = _buf_flush_once(buf);
+		write_len = buf_flush_once(buf);
 		if (write_len == -1) {
 			return -1;
 		}
@@ -138,7 +155,7 @@ ssize_t buf_flush(struct bufio *buf)
 	ssize_t write_len, tmp_len;
 
 	while (buf->len > 0) {
-		tmp_len = _buf_flush_once(buf);
+		tmp_len = buf_flush_once(buf);
 		if (tmp_len == -1) {
 			return -1;
 		}
@@ -149,20 +166,21 @@ ssize_t buf_flush(struct bufio *buf)
 	return write_len;
 }
 
-static ssize_t _buf_read_once(struct bufio *buf)
+static ssize_t buf_read_once(struct bufio *buf)
 {
 	size_t tmp_len;
+	ssize_t write_len;
 	char *buf_ptr;
 
 	//可用的最大长度
-	_buf_can_write_max(buf, &buf_ptr, &tmp_len);
+	buf_can_write_max(buf, &buf_ptr, &tmp_len);
 	if (tmp_len == 0) {
 		return 0;
 	}
 
 INTR_AGAIN:
 	write_len = read(buf->fd, buf_ptr, tmp_len);
-	if (write_len < 0) {
+	if (write_len == -1) {
 		if (errno == EINTR) {
 			//中断退出则重来一次
 			goto INTR_AGAIN;
@@ -171,24 +189,24 @@ INTR_AGAIN:
 		}
 	}
 
-	_buf_len_add(write_len);
+	buf_len_add(buf, write_len);
 
 	return write_len;
 }
 
 //只进行一次刷缓冲行为
-static ssize_t _buf_flush_once(struct bufio *buf)
+static ssize_t buf_flush_once(struct bufio *buf)
 {
 	size_t tmp_len;
 	ssize_t write_len;
 	char *buf_ptr;
 
-	_buf_can_read_max(buf, &buf_ptr, &tmp_len);
+	buf_can_read_max(buf, &buf_ptr, &tmp_len);
 
 INTR_AGAIN:
 	//将数据写出
 	write_len = write(buf->fd, buf_ptr, tmp_len);
-	if (write_len < 0) {
+	if (write_len == -1) {
 		if (errno == EINTR) {
 			//中断退出则重来一次
 			goto INTR_AGAIN;
@@ -198,13 +216,13 @@ INTR_AGAIN:
 	}
 
 	//缓冲长度减少
-	_buf_len_del(buf, write_len);
+	buf_len_del(buf, write_len);
 
 	return write_len;
 }
 
 //计算最大可读的连续内存长度
-static void _buf_can_read_max(struct bufio *buf, char **buf, size_t *len)
+static void buf_can_read_max(struct bufio *buf, char **bufed, size_t *len)
 {
 	size_t tmp;
 	tmp = buf->offset + buf->len;
@@ -217,10 +235,10 @@ static void _buf_can_read_max(struct bufio *buf, char **buf, size_t *len)
 		*len = buf->len;
 	}
 
-	*buf = buf->buf + buf->offset;
+	*bufed = buf->buf + buf->offset;
 }
 
-static void _buf_len_del(struct bufio *buf, size_t len)
+static void buf_len_del(struct bufio *buf, size_t len)
 {
 	//移动启始偏移
 	buf->offset += len;
@@ -237,7 +255,7 @@ static void _buf_len_del(struct bufio *buf, size_t len)
 }
 
 //计算最大可写的连续内存
-static void _buf_can_write_max(struct bufio *buf, char **buf, size_t *len)
+static void buf_can_write_max(struct bufio *buf, char **bufed, size_t *len)
 {
 	size_t tmp, offset;
 
@@ -253,10 +271,10 @@ static void _buf_can_write_max(struct bufio *buf, char **buf, size_t *len)
 		*len = buf->offset - offset;
 	}
 
-	*buf = buf->buf + offset;
+	*bufed = buf->buf + offset;
 }
 
-static void _buf_len_add(struct bufio *buf, size_t len)
+static void buf_len_add(struct bufio *buf, size_t len)
 {
 	//缓冲长度增加
 	buf->len += len;

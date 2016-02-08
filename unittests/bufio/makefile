@@ -3,13 +3,18 @@ all: bufio
 CC = gcc
 
 #CFLAGS = -Wall -std=gnu99 -pthread -Wformat -Wswitch-default -Wunused -Wparentheses
-MY_CFLAGS = -Wall -std=gnu99 -pthread -I../../
+MY_CFLAGS = -Wall -std=gnu99 -pthread -I../../src/include
 
 CFLAGS = -g $(MY_CFLAGS)
 
-bufio: test_bufio.c bufio.o ../../bufio.c
-	$(LINK.c) -o unittest test_bufio.c bufio.o
+bufio: test_bufio.o bufio.o
+	$(LINK.c) -o unittest.out test_bufio.o bufio.o
 
-bufio.o: ../../bufio.c
-	$(COMPILE.c) ../../bufio.c
+test_bufio.o: test_bufio.c
+	$(COMPILE.c) test_bufio.c
 
+bufio.o: ../../src/bufio.c
+	$(COMPILE.c) ../../src/bufio.c
+
+clean:
+	-rm *.o *.out

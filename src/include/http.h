@@ -4,7 +4,7 @@
 #include "socket.h"
 
 //http协议处理
-void http_serve(struct client * client);
+void http_serve(Ctx *);
 
 
 #endif

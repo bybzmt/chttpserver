@@ -12,24 +12,39 @@ static void buf_len_del(struct bufio *buf, size_t len);
 static void buf_can_write_max(struct bufio *buf, char **bufed, size_t *len);
 static void buf_len_add(struct bufio *buf, size_t len);
 
+int buf_init(struct bufio *buf, size_t len, int fd)
+{
+	buf->cap = len;
+	buf->offset = 0;
+	buf->len = 0;
+	buf->fd = fd;
+	buf->buf = (char *)malloc(len);
+	if (buf->buf == NULL) {
+		return -1;
+	}
+
+	return 0;
+}
+
 ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 {
-	size_t data_len, data_offset, tmp_len;
+	size_t data_len, data_offset = 0, tmp_len;
 	ssize_t write_len;
-	char *buf_ptr, *tmp_ptr;
+	char *buf_ptr, *tmp_ptr = NULL;
+
+	data_len = len;
 
 	//无缓冲时读取数据
 	if (buf->len == 0) {
+READ_AGAIN:
 		write_len = buf_read_once(buf);
 		if (write_len == 0) {
-			return 0;
+			errno = errno_unexpect_end;
+			return -1;
 		} else if (write_len == -1) {
 			return -1;
 		}
 	}
-
-	data_len = len;
-	data_offset = 0;
 
 	//将数据复制到缓冲区
 	while (data_len > 0 && buf->len > 0) {
@@ -60,27 +75,36 @@ ssize_t buf_readline(struct bufio *buf, const void *data, size_t len)
 		}
 	}
 
+	if (tmp_ptr == NULL) {
+		if (data_len > 0) {
+			goto READ_AGAIN;
+		} else {
+			errno = errno_data_too_big;
+			return -1;
+		}
+	}
+
 	return data_offset;
 }
 
 ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
 {
-	size_t data_len, data_offset, tmp_len;
+	size_t data_len, data_offset = 0, tmp_len;
 	ssize_t write_len;
 	char *buf_ptr;
 
+	data_len = len;
+
 	//无缓冲时读取数据
 	if (buf->len == 0) {
+READ_AGAIN:
 		write_len = buf_read_once(buf);
 		if (write_len == 0) {
-			return 0;
+			return data_offset;
 		} else if (write_len == -1) {
 			return -1;
 		}
 	}
-
-	data_len = len;
-	data_offset = 0;
 
 	//将数据复制到缓冲区
 	while (data_len > 0 && buf->len > 0) {
@@ -100,6 +124,10 @@ ssize_t buf_read(struct bufio *buf, const void *data, size_t len)
 
 		//缓冲长度减少
 		buf_len_del(buf, tmp_len);
+	}
+
+	if (data_len > 0) {
+		goto READ_AGAIN;
 	}
 
 	return data_offset;

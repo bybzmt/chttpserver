@@ -17,6 +17,16 @@ struct bufio {
 	int fd;
 };
 
+struct buffer {
+	size_t len;
+	size_t offset;
+	char buf[];
+};
+
+int errno_unexpect_end = 10001;
+int errno_data_too_big = 10002;
+
+int buf_init(struct bufio *buf, size_t len);
 
 //从缓冲区读出一行数据，函数以"\r\n"作为行分隔
 //成功返回读取到的字节数

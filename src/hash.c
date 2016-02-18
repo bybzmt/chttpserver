@@ -1,3 +1,5 @@
+#include <stdint.h>
+#include "hash.h"
 
 //fnv1a hash算法
 uint32_t fnv1a_hash(char data[], size_t len)

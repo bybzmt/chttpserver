@@ -1,19 +1,14 @@
 #include <stdint.h>
 #include <setjmp.h>
 #include <pthread.h>
+#include <stdio.h>
+#include <stdlib.h>
 #include "exception.h"
 
-pthread_key_t key_exception;
-
-typedef struct _exception {
-	//父级上下文
-	Exception *parent;
-	//跳出位置
-	sigjmp_buf jmpbuf;
-} Exception;
-
-void painc(int32_t no, const char err[])
+void panic(int32_t no, const char err[])
 {
+	Exception *e;
+
 	e = (Exception *)pthread_getspecific(key_exception);
 
 	if (err != NULL) {
@@ -54,15 +49,13 @@ void exception_recover(Exception *e)
 	int re;
 
 	if (e->parent == NULL) {
-		n = pthread_setspecific(key_exception, NULL);
+		re = pthread_setspecific(key_exception, NULL);
 	} else {
-		n = pthread_setspecific(key_exception, e->parent);
+		re = pthread_setspecific(key_exception, e->parent);
 	}
 
-	if (n != 0) {
+	if (re != 0) {
 		fprintf(stderr, "pthread_setspecific error!\n");
 		exit(1);
 	}
-
-	return re;
 }

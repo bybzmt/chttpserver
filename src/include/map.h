@@ -7,11 +7,11 @@
 typedef struct _mapdata {
 	uint32_t h;
 	//在当前槽中的下一个
-	MapData *next;
-	MapData *prev;
+	struct _mapdata *next;
+	struct _mapdata *prev;
 	//在整个map中的上一个
-	MapData *listNext;
-	MapData *listPrev;
+	struct _mapdata *listNext;
+	struct _mapdata *listPrev;
 	void *data;
 	uint16_t klen;
 	char key[1];
@@ -21,7 +21,7 @@ typedef struct _hash_map {
 	size_t len;
 	size_t cap;
 	MapData *next;
-	MapData *data[];
+	MapData **data;
 } Map;
 
 void map_init(Map *map);

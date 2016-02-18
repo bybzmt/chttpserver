@@ -10,6 +10,4 @@ typedef struct _data {
 
 void base_init();
 
-void data_free(data *d);
-
 #endif

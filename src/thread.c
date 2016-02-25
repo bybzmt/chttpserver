@@ -26,7 +26,7 @@ void thread_create(Ctx *ctx)
 	}
 }
 
-static void *thread_callback(void *ctx)
+void *thread_callback(void *ctx)
 {
 	//注册清理函数
 	pthread_cleanup_push(thread_clear, ctx);
@@ -40,7 +40,7 @@ static void *thread_callback(void *ctx)
 	return NULL;
 }
 
-static void thread_clear(void *ctx)
+void thread_clear(void *ctx)
 {
 	ctx_close((Ctx *) ctx);
 }

@@ -14,10 +14,16 @@ typedef struct _exception {
 	sigjmp_buf jmpbuf;
 } Exception;
 
+//初始化异常key
+void exception_key_init();
+
+//发生异常
 void panic(int32_t no, const char err[]);
 
+//异常初始化
 void exception_init(Exception *e2);
 
-void exception_recover(Exception *e);
+//异常销毁
+void exception_destroy(Exception *e);
 
 #endif

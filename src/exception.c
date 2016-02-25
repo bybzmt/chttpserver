@@ -3,7 +3,18 @@
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <errno.h>
 #include "exception.h"
+
+void exception_key_init()
+{
+	int n;
+	n = pthread_key_create(&key_exception, NULL);
+	if (n != 0) {
+		fprintf(stderr, "pthread_key_create error:%d\n", errno);
+		exit(1);
+	}
+}
 
 void panic(int32_t no, const char err[])
 {
@@ -37,14 +48,14 @@ void exception_init(Exception *e2)
 		e2->parent = e1;
 	}
 
-	re = pthread_setspecific(key_exception, &e2);
+	re = pthread_setspecific(key_exception, e2);
 	if (re != 0) {
 		fprintf(stderr, "pthread_setspecific error!\n");
 		exit(1);
 	}
 }
 
-void exception_recover(Exception *e)
+void exception_destroy(Exception *e)
 {
 	int re;
 

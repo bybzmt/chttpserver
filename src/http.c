@@ -56,8 +56,10 @@ void http_serve(Ctx *ctx)
 	if (re == 0) {
 		http_parse(ctx);
 	} else {
-		exception_recover(&e);
+		//出问题了
 	}
+
+	exception_destroy(&e);
 
 	free(conn.rbuf.buf);
 	free(conn.wbuf.buf);

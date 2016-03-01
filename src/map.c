@@ -153,18 +153,18 @@ static inline void _map_resize(Map *map)
 	}
 }
 
-static inline MapData *_do_mapdata_init(Map *map, uint32_t hash, char key[], size_t len, void *value)
+inline MapData *_do_mapdata_init(Map *map, uint32_t hash, char key[], size_t len, void *value)
 {
 	MapData *d;
 
-	d = (MapData *) malloc(sizeof(MapData) + len);
+	d = (MapData *) malloc(sizeof(MapData));
 	if (d == NULL) {
 		panic(1, "_do_mapdata_init malloc error");
 	}
 
 	d->h = hash;
-	d->klen = len;
-	memcpy(&d->key, key, len);
+	d->len = len;
+	d->key = key;
 
 	d->data = value;
 
@@ -176,7 +176,7 @@ static inline MapData *_do_mapdata_init(Map *map, uint32_t hash, char key[], siz
 	return d;
 }
 
-static inline void _do_mapdata_add(Map *map, MapData *d)
+inline void _do_mapdata_add(Map *map, MapData *d)
 {
 	int i;
 	i = d->h % map->cap;
@@ -196,7 +196,7 @@ static inline void _do_mapdata_add(Map *map, MapData *d)
 	map->next = d;
 }
 
-static inline MapData *_do_mapdata_get(Map *map, uint32_t h, char key[], size_t len)
+inline MapData *_do_mapdata_get(Map *map, uint32_t h, char key[], size_t len)
 {
 	MapData *d;
 	int i;
@@ -206,7 +206,7 @@ static inline MapData *_do_mapdata_get(Map *map, uint32_t h, char key[], size_t 
 	d = map->data[i];
 
 	while (d != NULL) {
-		if ((len == d->klen) && (memcmp(d->key, key, len) == 0)) {
+		if ((len == d->len) && (memcmp(d->key, key, len) == 0)) {
 			return d;
 		}
 
@@ -216,7 +216,7 @@ static inline MapData *_do_mapdata_get(Map *map, uint32_t h, char key[], size_t 
 	return NULL;
 }
 
-static inline void _do_mapdata_del(Map *map, MapData *d)
+inline void _do_mapdata_del(Map *map, MapData *d)
 {
 	int i;
 	i = d->h % map->cap;
@@ -238,6 +238,9 @@ static inline void _do_mapdata_del(Map *map, MapData *d)
 	if (map->next == d) {
 		map->next = d->next;
 	}
+
+	free(d->key);
+	free(d);
 
 	map->len--;
 }

@@ -13,8 +13,8 @@ typedef struct _mapdata {
 	struct _mapdata *listNext;
 	struct _mapdata *listPrev;
 	void *data;
-	uint16_t klen;
-	char key[1];
+	uint16_t len;
+	char *key;
 } MapData;
 
 typedef struct _hash_map {

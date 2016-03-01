@@ -16,14 +16,13 @@ struct TCPConn {
 	struct client *client;
 };
 
-
 struct _request {
 	//请求方法
-	Data Method;
+	struct chunk_data Method;
 	//请求URI
-	Data RequestURI;
+	struct chunk_data RequestURI;
 	//协议
-	Data Proto;
+	struct chunk_data Proto;
 	//请求头
 	Map Header;
 	//请求体
@@ -78,27 +77,113 @@ void http_parse(struct TCPConn *conn)
 
 void http_parse_request(struct Request *req)
 {
-	tmp = buffer_readString(req->rbuf, req->fd, ' ', req->method);
-	if (tmp == -1) {
-		fprintf(stderr, "request method error.");
-		return;
-	}
+	ssize_t offset, pos;
+	size_t len;
 
-	tmp = buffer_readString(req->rbuf, req->fd, ' ', req->RequestURI);
-	if (tmp == -1) {
-		fprintf(stderr, "request uri error.");
-		return;
-	}
+	offset = 0;
 
-	tmp = buffer_readStringLine(req->rbuf, req->fd, req->Proto);
-	if (tmp == -1) {
-		fprintf(stderr, "request protol error.");
-		return;
+	pos = read_unti_char(buf, req->fd, offset, ' ', 10);
+
+	req->method = chunk_buffer_to_chunk_data(buf, offset, pos - offset);
+
+	//跳过刚的找到的空格
+	offset = pos + 1;
+	
+	pos = read_unti_char(buf, req->fd, offset, ' ', 1024*8);
+
+	req->requestURI = chunk_buffer_to_chunk_data(buf, offset, pos - offset);
+
+	//跳过刚的找到的空格
+	offset = pos + 1;
+	
+	pos = read_unti_char(buf, req->fd, offset, '\n', 1024*8);
+
+	req->Proto = chunk_buffer_to_chunk_data(buf, offset, pos - offset);
+
+	//修正未尾换行
+	fix_line_end(&req->Proto);
+
+	offset = pos + 1;
+}
+
+//读取直到某个字符停下来
+size_t read_unti_char(struct chunk_buffer *buf, int fd, size_t offset, char code, size_t max_size)
+{
+	ssize_t pos;
+
+	for (;;) {
+		pos = chunk_buffer_pos(buf, offset, code);
+		if (pos == -1) {
+			if (buf->len > max_size) {
+				painc(2, "request too large.");
+			} else {
+				//查找指针指向内容未尾
+				offset = buf->len;
+
+				pos = chunk_buffer_readMore(buf, req->fd);
+				if (pos < 1) {
+					painc(2, "request io error.");
+				}
+			}
+		} else {
+			return pos;
+		}
 	}
 }
 
-void http_parse_headers(struct Request *req)
+//修正未尾的换行符问题
+void fix_line_end(struct chunk_data *chunk)
 {
+	struct len_data *tmp;
+	tmp = &chunk->chunks[chunk->chunk_num-1];
+	if (tmp->data[tmp.len-1] == '\r') {
+		tmp->len--;
+		chunk->len--;
+	}
+}
+void fix_line_end(struct chunk_buffer *buf)
+{
+	struct len_data *tmp;
+	tmp = &chunk->chunks[chunk->chunk_num-1];
+	if (tmp->data[tmp.len-1] == '\r') {
+		tmp->len--;
+		chunk->len--;
+	}
+}
+
+void http_parse_headers(struct chunk_buffer *buf, int fd, size_t offset, struct Request *req)
+{
+	map_init(&req->Header);
+
+	for (;;) {
+		pos = read_unti_char(buf, req->fd, offset, '\n', 1024*1024);
+
+		if (chunk_buffer_at(buf, pos - 1) == "\r") {
+			r_pos = pos - 1;
+		}
+
+		len = r_pos - offset;
+
+		//空行表示头结束
+		if (len == 0) {
+			break;
+		}
+
+		if (len > 255) {
+			panic(3, "header name too long");
+		}
+
+		key = (char *) malloc(len);
+		if (key == NULL) {
+			panic(3, "parse_header malloc");
+		}
+
+		chunk_buffer_to_data(buf, key, offset, len);
+
+		map_add(&req->Header, key, len);
+
+		free(key);
+	}
 }
 
 static ssize_t writen(int fd, const void *data, size_t len)

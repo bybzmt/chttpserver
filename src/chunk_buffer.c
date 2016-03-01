@@ -32,6 +32,60 @@ void chunk_buffer_init(struct chunk_buffer *buf)
 	}
 }
 
+//复制指定位置的缓存数据到连续的内存
+struct chunk_data *chunk_buffer_to_data(const struct chunk_buffer *buf, size_t offset, size_t len)
+{
+	uint16_t chunk_start_i, chunk_start_offset, chunk_start_len, chunk_end_i, chunk_end_len;
+	struct chunk_data *data;
+	int num;
+
+	if (offset > buf->len) {
+		panic(3, "chunk_buffer_to_chunk_data offset > len");
+	}
+	if (offset + len > buf->len) {
+		panic(3, "chunk_buffer_to_chunk_data offset+len > len");
+	}
+
+	//找到起始页和起始页偏移
+	chunk_start_i = offset / buf->chunk_size;
+	chunk_start_offset = offset % buf->chunk_size;
+	chunk_start_len = buf->chunk_size - chunk_start_offset;
+
+	//找到结束页和结束页长度
+	chunk_end_i = (offset + len - 1) / buf->chunk_size;
+	chunk_end_len = (offset + len) % buf->chunk_size;
+	if (chunk_end_len == 0) {
+		chunk_end_len = buf->chunk_size;
+	}
+
+	//涉及到的数据块数量(-1)
+	num = chunk_end_i - chunk_start_i;
+
+	data = (char *)malloc(len);
+	if (data == NULL) {
+		panic(3, "chunk_buffer_to_data malloc fail");
+	}
+
+	//起始块
+	memcpy(data, buf->bufs[chunk_start_i] + chunk_start_offset, chunk_start_len);
+
+	data_ptr = data + chunk_start_len;
+
+	//其它中间块儿
+	for (int i=1; i < num; i++) {
+		memcpy(data_ptr, buf->bufs[chunk_start_i + i], buf->chunk_size);
+
+		data_ptr = data + buf->chunk_size;
+	}
+
+	//结束块
+	if (num > 0) {
+		memcpy(data_ptr, buf->bufs[chunk_end_i], chunk_end_len);
+	}
+
+	return data;
+}
+
 //标记指定位置的缓存数据为分块数据
 struct chunk_data *chunk_buffer_to_chunk_data(const struct chunk_buffer *buf, size_t offset, size_t len)
 {
@@ -40,10 +94,10 @@ struct chunk_data *chunk_buffer_to_chunk_data(const struct chunk_buffer *buf, si
 	int num;
 
 	if (offset > buf->len) {
-		return NULL;
+		panic(3, "chunk_buffer_to_chunk_data offset > len");
 	}
 	if (offset + len > buf->len) {
-		return NULL;
+		panic(3, "chunk_buffer_to_chunk_data offset+len > len");
 	}
 
 	//找到起始页和起始页偏移

@@ -3,7 +3,7 @@ all: dorun
 CC = gcc
 
 #CFLAGS = -Wall -std=gnu99 -pthread -Wformat -Wswitch-default -Wunused -Wparentheses
-MY_CFLAGS = -Wall -std=gnu99 -pthread -I../../../src/include
+MY_CFLAGS = -Wall -std=gnu99 -pthread -I../../../include
 
 CFLAGS = -g $(MY_CFLAGS)
 

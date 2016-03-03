@@ -1,97 +1,60 @@
 #include <unistd.h>
 #include <errno.h>
-#include <string.h>
+#include "mystring.h"
+#include "buffer.h"
 
-//缓冲区可用容量
-#define BUFFER_SIZE 4096
-
-struct buffer {
-	size_t offset;
-	size_t len;
-	//总缓存空间容量
-	size_t cap;
-	//缓存本体
-	char *buf;
-};
+static ssize_t _buffer_read(struct buffer *buf, int fd, void *ptr, size_t len);
+static ssize_t _buffer_readv(struct buffer *buf, int fd, void *ptr, size_t len);
 
 int buffer_init(struct buffer *buf)
 {
-	buf->offset = 0;
+	assert(buf != NULL);
+
 	buf->len = 0;
 	buf->cap = BUFFER_SIZE;
-	buf->buf = (char *)malloc(BUFFER_SIZE);
+	buf->start = malloc(BUFFER_SIZE);
 	if (buf->buf == NULL) {
 		panic(3, "buffer_init malloc fail");
 	}
 
+	buf->stop = buf->start + buf->cap;
+	buf->ptr = buf->start;
+
 	return 0;
 }
 
-//从缓存空间移出数据
-size_t buffer_move(struct buffer *buf, void *ptr, size_t len)
+//读入数据到缓存尾部
+ssize_t buffer_push_from_read(struct buffer *buf, int fd)
 {
-	size_t mlen;
-
-	//可用数据长度
-	if (buf->len < len) {
-		mlen = buf->len;
-	} else {
-		mlen = len;
-	}
-
-	if (buf->offset + len > buf->cap) {
-		tlen = buf->cap - buf->offset;
-
-		//第1段，从偏移到缓冲未尾
-		memcpy(ptr, buf->buf[buf->offset], tlen);
-
-		//第2段，从缓冲开头开始
-		memcpy(ptr + tlen, buf->buf[0], mlen - tlen);
-	} else {
-		memcpy(ptr, buf->buf[buf->offset], mlen);
-	}
-
-	buf->offset += mlen;
-	if (buf->offset >= buf->cap) {
-		buf->offset -= buf->cap;
-	}
-
-	buf->len -= mlen;
-
-	return mlen;
-}
-
-//从文件读入数据到缓存
-ssize_t buffer_read(struct buffer *buf, int fd)
-{
-	size_t offset, len;
+	void *ptr;
+	size_t len;
 
 	//空闲空间长度
 	len = buf->cap - buf->len;
-	if (len == 0) {
+	if (len < 1) {
 		return 0;
 	}
 
 	//空闲空间位置
-	offset = buf->offset + buf->len;
-	if (offset > buf->cap) {
-		offset -= buf->cap;
+	ptr = buf->ptr + buf->len;
+	if (ptr >= buf->stop) {
+		ptr -= buf->cap;
 	}
 
 	//判断是分块
-	if (offset + len > buf->cap) {
-		return _buffer_readv(buf, fd, offset, len);
+	if (ptr + len > buf->stop) {
+		return _buffer_readv(buf, fd, ptr, len);
 	} else {
-		return _buffer_read(buf, fd, offset, len);
+		return _buffer_read(buf, fd, ptr, len);
 	}
 }
 
-inline ssize_t _buffer_read(struct buffer *buf, int fd, size_t offset, size_t len)
+inline ssize_t _buffer_read(struct buffer *buf, int fd, void *ptr, size_t len)
 {
 	ssize_t size;
 
 INTR_AGAIN:
-	size = read(fd, buf->buf[offset], len);
+	size = read(fd, ptr, len);
 	if (size == -1) {
 		if (errno == EINTR) {
 			//中断退出则重来一次
@@ -107,15 +70,15 @@ INTR_AGAIN:
 }
 
 //聚合读
-inline ssize_t _buffer_readv(struct buffer *buf, int fd, size_t offset, size_t len)
+inline ssize_t _buffer_readv(struct buffer *buf, int fd, void *ptr, size_t len)
 {
 	ssize_t size;
 	struct iovec tmp[2];
 
-	tmp[0].iov_base = buf->buf[offset];
-	tmp[0].iov_len = buf->cap - offset;
+	tmp[0].iov_base = ptr;
+	tmp[0].iov_len = buf->stop - ptr;
 
-	tmp[1].iov_base = buf->buf[0];
+	tmp[1].iov_base = buf->start;
 	tmp[1].iov_len = len - tmp[0].iov_len;
 
 	//读取数据
@@ -135,74 +98,237 @@ INTR_AGAIN:
 	return size;
 }
 
-//查找字符串，反回从offset开的长度
-ssize_t buffer_chr(struct buffer *buf, char chr)
+//查找字符，反回从要查的字符的位置
+ssize_t buffer_chrpos(struct buffer *buf, char ch, size_t offset)
 {
-	char *ptr;
+	void *ptr, *tmp;
+	size_t len;
 
-	if (buf->offset + buf->len > buf->cap) {
-		tlen = buf->cap - buf->offset;
+	if (offset >= buf->len) {
+		return -1;
+	}
+
+	//可用数据长度
+	len = buf->len - offset;
+
+	//要查找的偏移位置
+	ptr = buf->ptr + offset;
+	if (ptr >= buf->stop) {
+		ptr -= buf->cap;
+	}
+
+	//判断是否越界
+	if (ptr + len > buf->stop) {
+		tlen = buf->stop - ptr;
 
 		//第1段，从偏移到缓冲未尾
-		ptr = (char *)memchr(buf->buf[buf->offset], chr, tlen);
-		if (ptr != NULL) {
-			return ptr - buf->[buf->offset];
+		tmp = memchr(ptr, ch, tlen);
+		if (tmp != NULL) {
+			return offset + (tmp - ptr);
 		}
 
 		//第2段，从缓冲开头开始
-		ptr = (char *)memchr(buf->buf[0], chr, buf->len - tlen);
-		if (ptr != NULL) {
-			return tlen + (ptr - buf->buf[0]);
+		tmp = memchr(buf->start, ch, len - tlen);
+		if (tmp != NULL) {
+			return offset + tlen + (tmp - buf->start);
 		}
 	} else {
-		ptr = (char *)memchr(buf->buf[buf->offset], chr, buf->len);
-		if (ptr != NULL) {
-			return ptr - buf->[buf->offset];
+		tmp = memchr(ptr, ch, len);
+		if (tmp != NULL) {
+			return tmp - ptr;
 		}
 	}
 
 	return -1;
 }
 
-ssize_t buffer_strpos(struct buffer *buf, char *se, size_t se_len)
+//查找字符，反回找到的指针
+void *buffer_chr(struct buffer *buf, size_t offset, char ch)
 {
-	ssize_t offset;
+	void *start, *tmp;
+	size_t len;
 
-	if (buf->offset + buf->len > buf->cap) {
-		tlen = buf->cap - buf->offset;
+	if (buf->len < 1) {
+		return NULL;
+	}
 
-		//第1段，从偏移到缓冲未尾
-		offset = _buffer_strpos(buf->buf[buf->offset], tlen, se, se_len);
-		if (offset != -1) {
-			return offset;
-		}
+	//开始位置
+	start = buf->ptr + offset;
+	if (start >= buf->stop) {
+		start = buf->ptr;
+	}
 
-		//第2段，从缓冲开头开始
-		offset = _buffer_strpos(buf->buf[0], buf->len - tlen, se, se_len);
-		if (offset != -1) {
-			return tlen + offset;
+	//结束位置
+	stop = buf->ptr + buf->len;
+	if (stop > buf->stop) {
+		stop -= buf->cap;
+	}
+
+	//判断是否越界
+	if (start < stop) {
+		tmp = memchr(start, ch, stop - start);
+		if (tmp != NULL) {
+			return tmp;
 		}
 	} else {
-		offset = _buffer_strpos(buf->buf[buf->offset], buf->len, se, se_len);
-		if (offset != -1) {
-			return offset;
+		//第1段，从偏移到缓冲未尾
+		tmp = memchr(start, ch, buf->stop - start);
+		if (tmp != NULL) {
+			return tmp;
+		}
+
+		//第2段，从缓冲开头开始到结束
+		tmp = memchr(buf->start, ch, stop - buf->start);
+		if (tmp != NULL) {
+			return start;
 		}
 	}
 
-	return -1;
+	return NULL;
 }
 
-ssize_t _buffer_strpos(char *str, size_t len, char *se, size_t se_len)
+//查找字符，反回找到的指针
+void *buffer_chrs(struct buffer *buf, size_t offset, char *chs)
 {
-	for (size_t i=0; i < len; i++) {
-		for (size_t x=0; x < se_len; x++) {
-			if (*str == se[x]) {
-				return i;
-			}
-		}
+	void *start, *tmp;
+	size_t len;
 
-		str++;
+	if (buf->len < 1) {
+		return NULL;
 	}
 
-	return -1;
+	//开始位置
+	start = buf->ptr + offset;
+	if (start >= buf->stop) {
+		start = buf->ptr;
+	}
+
+	//结束位置
+	stop = buf->ptr + buf->len;
+	if (stop > buf->stop) {
+		stop -= buf->cap;
+	}
+
+	//判断是否越界
+	if (start < stop) {
+		tmp = memchrs(start, chs, stop - start);
+		if (tmp != NULL) {
+			return tmp;
+		}
+	} else {
+		//第1段，从偏移到缓冲未尾
+		tmp = memchrs(start, chs, buf->stop - start);
+		if (tmp != NULL) {
+			return tmp;
+		}
+
+		//第2段，从缓冲开头开始到结束
+		tmp = memchrs(buf->start, chs, stop - buf->start);
+		if (tmp != NULL) {
+			return start;
+		}
+	}
+
+	return NULL;
+}
+
+//从缓冲头部移出数据
+//从buf->ptr到stop为止
+size_t buffer_shift(struct buffer *buf, void *ptr, void *stop, size_t ptr_len)
+{
+	size_t len, tlen;
+
+	assert(buf != NULL);
+
+	if (buf->ptr == stop) {
+		return 0;
+	}
+
+	if (buf->ptr < stop) {
+		len = stop - buf->ptr;
+
+		memcpy(ptr, buf->start, len);
+	} else {
+		len = buf->stop - buf->ptr;
+
+		//第1段，从偏移到缓冲未尾
+		memcpy(ptr, buf->ptr, len);
+
+		tlen = stop - buf->start;
+
+		//第2段，从缓冲开头开始
+		memcpy(ptr + len, buf->start, tlen);
+
+		len += tlen;
+	}
+
+	buf->len -= len;
+
+	buf->ptr += len;
+	if (buf->ptr >= buf->stop) {
+		buf->ptr -= buf->cap;
+	}
+
+	return len;
+}
+
+//从缓冲头部移出数据
+size_t buffer_shift_len(struct buffer *buf, void *ptr, size_t len)
+{
+	size_t tlen;
+
+	assert(buf != NULL);
+
+	//可用数据长度
+	if (buf->len < len) {
+		len = buf->len;
+	}
+
+	if (buf->ptr + len > buf->stop) {
+		tlen = buf->stop - buf->ptr;
+
+		//第1段，从偏移到缓冲未尾
+		memcpy(ptr, buf->ptr, tlen);
+
+		//第2段，从缓冲开头开始
+		memcpy(ptr + tlen, buf->start, len - tlen);
+	} else {
+		memcpy(ptr, buf->start, len);
+	}
+
+	buf->len -= len;
+
+	buf->ptr += len;
+	if (buf->ptr >= buf->stop) {
+		buf->ptr -= buf->cap;
+	}
+
+	return len;
+}
+
+//从缓冲头部移出数据
+//从buf->ptr到stop为止
+size_t buffer_shift_trash(struct buffer *buf, size_t len)
+{
+	assert(buf != NULL);
+
+	//可用数据长度
+	if (buf->len < len) {
+		len = buf->len;
+	}
+
+	buf->len -= len;
+
+	buf->ptr += len;
+	if (buf->ptr >= buf->stop) {
+		buf->ptr -= buf->cap;
+	}
+
+	return len;
+}
+
+//消毁数据
+inline void buffer_destroy(struct buffer *buf)
+{
+	free(buf->start);
 }
